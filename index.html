@@ -2335,20 +2335,22 @@ function parseVcf(txt){
 }
 /* Ouvre l'application Contacts (Chrome Android, page en https) ; sinon import d'un fichier .vcf. Reprend TOUS les numéros du contact. */
 async function pickContact(note){
+  let diag=' [v2 : application Android non détectée]';
   if(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform()){
+    diag=' [v2 : erreur Contacts inconnue]';
     try{ const P=window.Capacitor.registerPlugin('Contacts'), pick=()=>P.pickContact({projection:{name:true,phones:true,emails:true}});
       let r; try{ r=await pick(); }catch(e0){ if(!/permission|denied|refus/i.test(String(e0&&e0.message||e0))) return null; await P.requestPermissions(); r=await pick(); }
       const c=r&&r.contact; if(!c) return null;
       const nm=(c.name&&(c.name.display||[c.name.given,c.name.family].filter(Boolean).join(' ')))||'';
       return {nom:nm,tel:joinPhones((c.phones||[]).map(x=>x.number).filter(Boolean)),email:((c.emails||[])[0]||{}).address||''};
-    }catch(e){ console.error(e); }
+    }catch(e){ console.error(e); diag=' [v2 : '+String((e&&e.message)||e)+']'; }
   }
   if(window.isSecureContext && navigator.contacts && window.ContactsManager){
     try{ const r=await navigator.contacts.select(['name','tel','email'],{multiple:false});
       if(r&&r[0]) return {nom:(r[0].name||[])[0]||'',tel:joinPhones(r[0].tel||[]),email:(r[0].email||[])[0]||''}; return null;
     }catch(e){ console.error(e); }
   }
-  if(note) note("L'ouverture directe de l'application Contacts n'est possible que sur la version en ligne (https) de l'application. Choisissez ici un contact exporté en fichier .vcf.");
+  if(note) note("L'ouverture directe de l'application Contacts n'est possible que sur la version en ligne (https) de l'application. Choisissez ici un contact exporté en fichier .vcf."+diag);
   return await new Promise(res=>{ const inp=document.createElement('input'); inp.type='file'; inp.accept='.vcf,text/vcard,text/x-vcard,text/directory'; inp.style.display='none'; document.body.appendChild(inp);
     inp.addEventListener('change',async()=>{ const fl=inp.files[0]; inp.remove(); if(!fl) return res(null); try{ const l=parseVcf(await fl.text()); res(l[0]||null); }catch(er){ console.error(er); res(null); } });
     inp.addEventListener('cancel',()=>{ inp.remove(); res(null); }); inp.click(); });
