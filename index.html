@@ -1673,6 +1673,10 @@ const PHOTOS_MIG_MSG="Enregistré, mais seule la première photo est conservée 
 async function dbSavePhotos(run,pl,arr){ try{ await run({...pl,photos:arr}); return true; }catch(e){ if(/photos/i.test(String((e&&(e.message||e.details))||''))){ await run(pl); return false; } throw e; } }
 const tsfPhHtml=(arr,svg)=>(arr.length?`<div class="mph">${arr.map((u,i)=>`<span class="mph-t"><img src="${esc(u)}" alt=""><button type="button" class="mph-x" data-a="phrm" data-i="${i}" aria-label="Retirer cette photo">×</button></span>`).join('')}</div>`:'')+`<button type="button" class="tsf-drop" data-a="ph"><span class="c">${svg}</span><b>${arr.length?'Ajouter une autre image':'Ajouter une image'}</b><small>Touchez pour sélectionner depuis la galerie ou appareil photo</small></button>`;
 const TSF_IMG_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="15" height="14" rx="2"/><path d="M6 16l4-4 3 3 2-2 3 3M20 3v6M17 6h6"/></svg>';
+const IS_NATIVE=!!(window.Capacitor&&window.Capacitor.isNativePlatform&&window.Capacitor.isNativePlatform());
+const capCall=(pl,m,o)=>{ const C=window.Capacitor, P=C.Plugins&&C.Plugins[pl]; return (P&&typeof P[m]==='function')?P[m](o):C.nativePromise(pl,m,o); };
+const blobB64=b=>new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=rej; r.readAsDataURL(b); });
+if(IS_NATIVE){ window.open=function(url){ if(url&&/^(https?:|tel:|sms:|mailto:|whatsapp:)/i.test(String(url))){ location.href=url; } return null; }; }
 const phsOf=a=>Array.isArray(a.photos)&&a.photos.length?a.photos:(a.photo?[a.photo]:[]);
 const tphsOf=a=>Array.isArray(a.tissuPhotos)&&a.tissuPhotos.length?a.tissuPhotos:(a.tissuPhoto?[a.tissuPhoto]:[]);
 function pickPhotos(opts){
@@ -3183,6 +3187,23 @@ function printReceipt(o, pay){
   ov.addEventListener('click',async e=>{
     const b=e.target.closest('[data-rv]'); if(!b) return; const a=b.dataset.rv;
     if(a==='x') return close();
+    if(IS_NATIVE && (a==='print'||a==='share'||a==='wa')){
+      b.disabled=true;
+      try{
+        const fname='Recu-'+String(R.num||'recu').replace(/[^\w-]+/g,'_');
+        if(a==='print'){ await capCall('DressaNative','print',{name:fname,html:R.doc}); }
+        else if(a==='share'){
+          let png=null; try{ png=await receiptPng(fr.contentDocument); }catch(er){ console.warn(er); }
+          if(png){ const w=await capCall('Filesystem','writeFile',{path:fname+'.png',data:await blobB64(png),directory:'CACHE'}); await capCall('Share','share',{title:R.title,text:R.text,files:[w.uri],dialogTitle:'Partager le reçu'}); }
+          else await capCall('Share','share',{title:R.title,text:R.text,dialogTitle:'Partager le reçu'});
+        } else {
+          let n=String(R.waNum||'').replace(/\D/g,''); if(n.length===10) n='225'+n;
+          if(!n){ say('Aucun numéro WhatsApp pour ce client.'); }
+          else { say("WhatsApp s'ouvre avec le résumé du reçu. Pour joindre l'image, utilisez « Partager »."); setTimeout(()=>{ location.href='https://wa.me/'+n+'?text='+encodeURIComponent(R.text); },900); }
+        }
+      }catch(err){ if(!/cancel|annul/i.test(String((err&&(err.message||err))||''))){ console.error(err); say((a==='print'?'Impression':'Partage')+' impossible : '+String((err&&err.message)||err)); } }
+      b.disabled=false; return;
+    }
     if(a==='print'){
       try{ fr.contentWindow.focus(); fr.contentWindow.print(); }
       catch(_){ const w=window.open('','_blank'); if(w){ w.document.write(R.doc.replace('</style>','</style>')+'<script>onload=()=>setTimeout(()=>print(),250)<\/script>'); w.document.close(); } else say("Impression impossible sur cet appareil."); }
@@ -3344,7 +3365,9 @@ function odpPaint(o){
     <div class="odp-ac">${manage&&!locked&&early?`<button class="odp-btn act" style="justify-content:center" data-a="edit">${odi('edit')}Modifier</button>`:''}${myRole()==='gerant'&&!locked?`<button class="odp-btn act dg ${manage&&early?'':'full'}" style="justify-content:center" data-a="del">${odi('trash')}Supprimer</button>`:''}</div></div></div></div>`;
 }
 function odpSheet(o){
-  const w=window.open('','_blank'); if(!w){ alert('Autorisez les fenêtres pop-up pour imprimer la fiche.'); return; }
+  let w=window.open('','_blank');
+  if(!w&&IS_NATIVE){ let buf=''; w={document:{write:h=>{buf+=h;},close:()=>{ capCall('DressaNative','print',{name:'Fiche-'+orderNum(o),html:buf}).catch(er=>alert('Impression impossible : '+String((er&&er.message)||er))); }}}; }
+  if(!w){ alert('Autorisez les fenêtres pop-up pour imprimer la fiche.'); return; }
   const shop=(document.getElementById('brandName')||{}).textContent||'Atelier';
   const rows=artsOf(o).map(a=>`<h3>${esc(a.nom)} × ${Number(a.qte)||1}${a.pour?' — pour '+esc(a.pour):''}</h3><p>${a.modele?'Modèle : '+esc(a.modele)+'<br>':''}${a.taille?'Taille : '+esc(a.taille)+'<br>':''}${a.ajustements?'<b>Ajustements nécessaires (retouches)</b><br>':''}${a.tissuCouleur?'Couleur : '+esc(a.tissuCouleur)+'<br>':''}${a.tissuNom||a.tissu?'Tissu : '+esc(a.tissuNom||a.tissu)+(a.tissuQte?' ('+esc(a.tissuQte)+' m)':'')+'<br>':''}${a.tissuNotes?'Notes tissu : '+esc(a.tissuNotes)+'<br>':''}${a.tissuAudio?'Note audio tissu : <a href="'+esc(a.tissuAudio)+'">écouter</a><br>':''}${a.notes?'Notes article : '+esc(a.notes)+'<br>':''}</p>${(a.mesures||[]).length?`<table>${a.mesures.map(m=>`<tr><td>${esc(m.label)}</td><td>${esc(m.valeur)}</td></tr>`).join('')}</table>`:''}`).join('');
   w.document.write(`<!doctype html><meta charset="utf-8"><title>Fiche ${esc(orderNum(o))}</title><style>body{font-family:Arial,sans-serif;max-width:560px;margin:20px auto;color:#111;font-size:13px}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse}td{padding:4px;border-bottom:1px solid #ddd}td+td{text-align:right;font-weight:bold}</style><h1>${esc(shop)} · Fiche de couture ${esc(orderNum(o))}</h1><p>Client : <b>${esc(o.client)}</b>${o.livraison?' · Livraison : <b>'+fmtLong(o.livraison)+'</b>':''}${o.essayage?' · Essayage : '+fmtLong(o.essayage):''}</p>${rows}${o.dateCommande?'<p>Date de commande : '+fmtLong(o.dateCommande)+'</p>':''}${o.adresse?'<p>Adresse : '+esc(o.adresse)+'</p>':''}${o.notes?'<p><b>Observations :</b> '+esc(o.notes)+'</p>':''}<script>onload=()=>print()<\/script>`); w.document.close();
@@ -3506,7 +3529,7 @@ async function odpClick(e){
   if(a==='remind'){ let n=String(phoneFor(cl,'wa')).replace(/\D/g,''); if(n.length===10) n='225'+n;
     const t=`Bonjour ${o.client}, il reste ${fcfa(resteOf(o))} à régler pour votre commande ${orderNum(o)}. Merci !`; return void window.open('https://wa.me/'+n+'?text='+encodeURIComponent(t),'_blank','noopener'); }
   if(a==='share'){ const url=location.origin+'/?a='+encodeURIComponent(currentAtelier||'');
-    try{ if(navigator.share) await navigator.share({title:orderNum(o),text:'Suivez votre commande '+orderNum(o),url}); else { await navigator.clipboard.writeText(url); showToast('<b>Lien copié</b>'); } }catch(_){} return; }
+    try{ if(IS_NATIVE) await capCall('Share','share',{title:orderNum(o),text:'Suivez votre commande '+orderNum(o),url}); else if(navigator.share) await navigator.share({title:orderNum(o),text:'Suivez votre commande '+orderNum(o),url}); else { await navigator.clipboard.writeText(url); showToast('<b>Lien copié</b>'); } }catch(_){} return; }
   if(a==='sew') return flSew(o);
   if(a==='finish') return flPickup(o,cl,()=>flFinish(o));   /* d'abord le message « commande prête », puis la date de fin */
   if(a==='deliver') return flDeliver(o);
