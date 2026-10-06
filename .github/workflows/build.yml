@@ -1,0 +1,31 @@
+name: Construire l'APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ranger les fichiers
+        run: |
+          mkdir -p www/icons assets scripts
+          mv index.html pwa.js manifest-atelier.webmanifest www/
+          mv apple-touch-icon.png icon-192.png icon-512.png www/icons/
+          mv icon-only.png icon-foreground.png icon-background.png splash.png splash-dark.png assets/
+          mv patch-android.sh scripts/
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: npm install
+      - run: npx cap add android
+      - run: bash scripts/patch-android.sh
+      - run: npx capacitor-assets generate --android
+      - run: npx cap sync android
+      - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dressa-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
